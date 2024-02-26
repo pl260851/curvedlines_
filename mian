@@ -1,0 +1,89 @@
+import cv2
+import numpy as np
+
+
+def region_of_interest(img, vertices):
+    mask = np.zeros_like(img)
+    cv2.fillPoly(mask, [vertices], 255)
+    masked = cv2.bitwise_and(img, mask)
+    return masked
+
+
+def draw_roi(img, vertices):
+    cv2.polylines(img, [vertices], isClosed=True, color=(255, 0, 0), thickness=2)
+
+
+def draw_midline(img, contours):
+    if len(contours) != 2:
+        return  # Ensure we have exactly two contours
+
+    # Simplified method to calculate midpoints
+    midpoints = []
+    for point_set_1, point_set_2 in zip(contours[0], contours[1]):
+        midpoint = ((point_set_1[0][0] + point_set_2[0][0]) // 2, (point_set_1[0][1] + point_set_2[0][1]) // 2)
+        midpoints.append(midpoint)
+
+    # Draw the midline using the midpoints
+    for i in range(len(midpoints) - 1):
+        cv2.line(img, midpoints[i], midpoints[i + 1], (255, 255, 0), 2)
+
+
+def process_image_for_curves(img, roi_vertices):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    canny_image = cv2.Canny(blurred, 100, 35)
+    cv2.imshow("Canny Image", canny_image)
+    masked_canny = region_of_interest(canny_image, roi_vertices)
+    contours, _ = cv2.findContours(masked_canny, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Assuming the two largest contours are the edges of the parallel lines
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:2]
+
+    # Draw the midline
+    draw_midline(img, contours)
+
+    # Optional: Draw the contours on the original image for visualization
+    for cnt in contours:
+        cv2.drawContours(img, [cnt], -1, (0, 255, 0), 8)
+
+    return img
+
+
+cap = cv2.VideoCapture(0)
+
+# Check if the camera opened successfully
+if not cap.isOpened():
+    print("Error: Could not open video capture")
+    exit()
+
+ret, frame = cap.read()
+if ret:
+    rows, cols, _ = frame.shape
+    roi_width = cols * 0.6
+    roi_height = rows * 0.6
+    top_left_vertex = (int((cols - roi_width) / 2), int((rows - roi_height) / 2))
+    bottom_right_vertex = (int((cols + roi_width) / 2), int((rows + roi_height) / 2))
+
+    roi_vertices = np.array([top_left_vertex,
+                             (top_left_vertex[0], bottom_right_vertex[1]),
+                             bottom_right_vertex,
+                             (bottom_right_vertex[0], top_left_vertex[1])], dtype=np.int32)
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+
+        processed_frame = process_image_for_curves(frame, roi_vertices)
+        draw_roi(processed_frame, roi_vertices)
+
+        cv2.imshow("Frame", processed_frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+else:
+    print("Failed to read frame from camera")
